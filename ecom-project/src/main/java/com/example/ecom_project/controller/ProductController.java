@@ -1,13 +1,11 @@
 package com.example.ecom_project.controller;
 
-import java.io.IOException;
-import java.util.List;
+import java.time.Duration;
 
-import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.CacheControl;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -19,87 +17,67 @@ import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
-import com.example.ecom_project.model.Product;
+import com.example.ecom_project.dto.ImageData;
+import com.example.ecom_project.dto.PageResponse;
+import com.example.ecom_project.dto.ProductRequest;
+import com.example.ecom_project.dto.ProductResponse;
 import com.example.ecom_project.service.ProductService;
 
+import jakarta.validation.Valid;
+
 @RestController
-@CrossOrigin
 @RequestMapping("/api")
 public class ProductController {
-      
-       @Autowired
-       private ProductService service;
-       
-       
-       @GetMapping("/products")
-       public ResponseEntity<List<Product>> getAllProducts(){
-        return new ResponseEntity<>(service.getAllProducts(), HttpStatus.OK);
-       }
-       @GetMapping("/product/{id}")
-       public ResponseEntity<Product> getProduct(@PathVariable int id) {
-        Product product = service.getProductById(id);
 
-        if(product != null)
-            return new ResponseEntity<>(product, HttpStatus.OK);
-        else
-            return new ResponseEntity<>(HttpStatus.NOT_FOUND);
-       }
-       
-       @PostMapping("/product")
-       public ResponseEntity<?> addProduct(@RequestPart Product product,
-                                           @RequestPart MultipartFile imageFile ){
-                    try {
-                        Product product1 = service.addProduct(product, imageFile);
-                        return new ResponseEntity<>(product1,HttpStatus.CREATED);
-                    } catch (Exception e) {
-                        return new ResponseEntity<>(e.getMessage(),HttpStatus.INTERNAL_SERVER_ERROR);
-                    }
-                }
-        @GetMapping("/product/{productId}/image")
-        public ResponseEntity<byte[]> getImageByProductId(@PathVariable int productId){
-            Product product = service.getProductById(productId);
-            byte[] imageFile = product.getImageData();
+    private final ProductService service;
 
-            return ResponseEntity.ok()
-                     .contentType(MediaType.valueOf(product.getImageType()))
-                     .body(imageFile);
+    public ProductController(ProductService service) {
+        this.service = service;
+    }
 
-        
-       }
-       @PutMapping("/product/{id}")
-       public ResponseEntity<String> updateProduct(@PathVariable int id,@RequestPart Product product,
-                                           @RequestPart MultipartFile imageFile ){
-         Product product1 = null;
-         try {
-            product1 = service.updateProduct(id, product,imageFile);
-         }  catch(IOException e){
-            return new ResponseEntity<>("Failed to update",HttpStatus.BAD_REQUEST);
+    /** Paged list. Optional filters: keyword (searches name/description/brand/category) and category. */
+    @GetMapping("/products")
+    public PageResponse<ProductResponse> getProducts(
+            @RequestParam(defaultValue = "") String keyword,
+            @RequestParam(defaultValue = "") String category,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "12") int size) {
+        return service.getProducts(keyword, category, page, size);
+    }
 
-         }
-         if(product1 != null)
-              return new ResponseEntity<>("Updated", HttpStatus.OK);
-         else
-               return new ResponseEntity<>("Failed to update",HttpStatus.BAD_REQUEST);
-         }
+    @GetMapping("/product/{id}")
+    public ProductResponse getProduct(@PathVariable int id) {
+        return service.getById(id);
+    }
 
+    @PostMapping("/product")
+    public ResponseEntity<ProductResponse> addProduct(
+            @RequestPart("product") @Valid ProductRequest product,
+            @RequestPart(value = "imageFile", required = false) MultipartFile imageFile) {
+        ProductResponse created = service.create(product, imageFile);
+        return ResponseEntity.status(HttpStatus.CREATED).body(created);
+    }
 
-         @DeleteMapping("/product/{id}")
-         public ResponseEntity<String> deleteProduct(@PathVariable int id){
-            Product product = service.getProductById(id);
-            if(product != null){
-                service.deleteProduct(id);
-                return new ResponseEntity<>("Deleted", HttpStatus.OK);
-            }
-            else{
-                return new ResponseEntity<>("Product not Found",HttpStatus.NOT_FOUND);
-            }
-         }
+    @PutMapping("/product/{id}")
+    public ProductResponse updateProduct(
+            @PathVariable int id,
+            @RequestPart("product") @Valid ProductRequest product,
+            @RequestPart(value = "imageFile", required = false) MultipartFile imageFile) {
+        return service.update(id, product, imageFile);
+    }
 
-         @GetMapping("/products/search")
-         public ResponseEntity<List<Product>> searchProducts(@RequestParam String keyword){
-            System.out.println("searching with "+ keyword);
-            List<Product> products = service.searchProducts(keyword);
-            return new ResponseEntity<>(products, HttpStatus.OK);
-         }
+    @DeleteMapping("/product/{id}")
+    public ResponseEntity<Void> deleteProduct(@PathVariable int id) {
+        service.delete(id);
+        return ResponseEntity.noContent().build();
+    }
 
+    @GetMapping("/product/{id}/image")
+    public ResponseEntity<byte[]> getImage(@PathVariable int id) {
+        ImageData image = service.getImage(id);
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType(image.contentType()))
+                .cacheControl(CacheControl.maxAge(Duration.ofSeconds(60)).cachePublic())
+                .body(image.data());
+    }
 }

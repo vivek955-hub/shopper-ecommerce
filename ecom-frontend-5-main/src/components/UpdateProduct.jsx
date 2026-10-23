@@ -1,13 +1,18 @@
 import { useState, useEffect } from "react";
-import { useParams } from "react-router-dom";
-import axios from "axios";
+import { useNavigate, useParams } from "react-router-dom";
+import API from "../axios";
+import { productImageUrl, PLACEHOLDER_IMAGE, handleImageError, getErrorMessage } from "../config";
 
 const UpdateProduct = () => {
   const { id } = useParams();
-  const [product, setProduct] = useState({});
-  const [image, setImage] = useState();
+  const navigate = useNavigate();
+  const [loaded, setLoaded] = useState(false);
+  const [hasImage, setHasImage] = useState(false);
+  const [newImage, setNewImage] = useState(null);
+  const [newImagePreview, setNewImagePreview] = useState("");
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
   const [updateProduct, setUpdateProduct] = useState({
-    id: null,
     name: "",
     description: "",
     brand: "",
@@ -19,225 +24,232 @@ const UpdateProduct = () => {
   });
 
   useEffect(() => {
-    const fetchProduct = async () => {
-      try {
-        const response = await axios.get(
-          `http://localhost:8080/api/product/${id}`
-        );
-
-        setProduct(response.data);
-      
-        const responseImage = await axios.get(
-          `http://localhost:8080/api/product/${id}/image`,
-          { responseType: "blob" }
-        );
-       const imageFile = await converUrlToFile(responseImage.data,response.data.imageName)
-        setImage(imageFile);     
-        setUpdateProduct(response.data);
-      } catch (error) {
-        console.error("Error fetching product:", error);
-      }
+    let cancelled = false;
+    API.get(`/product/${id}`)
+      .then((response) => {
+        if (cancelled) return;
+        const p = response.data;
+        setUpdateProduct({
+          name: p.name ?? "",
+          description: p.description ?? "",
+          brand: p.brand ?? "",
+          price: p.price ?? "",
+          category: p.category ?? "",
+          releaseDate: p.releaseDate ?? "",
+          productAvailable: Boolean(p.productAvailable),
+          stockQuantity: p.stockQuantity ?? "",
+        });
+        setHasImage(Boolean(p.imageName));
+        setLoaded(true);
+      })
+      .catch((err) => {
+        if (!cancelled) setError(getErrorMessage(err));
+      });
+    return () => {
+      cancelled = true;
     };
-
-    fetchProduct();
   }, [id]);
 
+  // Local preview for a newly selected image (released when it changes or the page closes).
   useEffect(() => {
-    console.log("image Updated", image);
-  }, [image]);
-
-
-
-  const converUrlToFile = async(blobData, fileName) => {
-    const file = new File([blobData], fileName, { type: blobData.type });
-    return file;
-  }
- 
-  const handleSubmit = async(e) => {
-    e.preventDefault();
-    console.log("images", image)
-    console.log("productsdfsfsf", updateProduct)
-    const updatedProduct = new FormData();
-    updatedProduct.append("imageFile", image);
-    updatedProduct.append(
-      "product",
-      new Blob([JSON.stringify(updateProduct)], { type: "application/json" })
-    );
-  
-
-  console.log("formData : ", updatedProduct)
-    axios
-      .put(`http://localhost:8080/api/product/${id}`, updatedProduct, {
-        headers: {
-          "Content-Type": "multipart/form-data",
-        },
-      })
-      .then((response) => {
-        console.log("Product updated successfully:", updatedProduct);
-        alert("Product updated successfully!");
-      })
-      .catch((error) => {
-        console.error("Error updating product:", error);
-        console.log("product unsuccessfull update",updateProduct)
-        alert("Failed to update product. Please try again.");
-      });
-  };
- 
+    if (!newImage) {
+      setNewImagePreview("");
+      return undefined;
+    }
+    const url = URL.createObjectURL(newImage);
+    setNewImagePreview(url);
+    return () => URL.revokeObjectURL(url);
+  }, [newImage]);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
-    setUpdateProduct({
+    setUpdateProduct({ ...updateProduct, [name]: value });
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError("");
+    setSaving(true);
+
+    const payload = {
       ...updateProduct,
-      [name]: value,
-    });
+      price: updateProduct.price === "" ? null : Number(updateProduct.price),
+      stockQuantity: updateProduct.stockQuantity === "" ? null : Number(updateProduct.stockQuantity),
+      releaseDate: updateProduct.releaseDate || null,
+    };
+
+    const formData = new FormData();
+    // The image is optional: if none is chosen the server keeps the current one.
+    if (newImage) {
+      formData.append("imageFile", newImage);
+    }
+    formData.append("product", new Blob([JSON.stringify(payload)], { type: "application/json" }));
+
+    try {
+      await API.put(`/product/${id}`, formData);
+      alert("Product updated successfully!");
+      navigate(`/product/${id}`);
+    } catch (err) {
+      console.error("Error updating product:", err);
+      setError(getErrorMessage(err));
+    } finally {
+      setSaving(false);
+    }
   };
-  
-  const handleImageChange = (e) => {
-    setImage(e.target.files[0]);
-  };
-  
+
+  let imageSrc = PLACEHOLDER_IMAGE;
+  if (newImagePreview) {
+    imageSrc = newImagePreview;
+  } else if (hasImage) {
+    imageSrc = productImageUrl(id, Date.now());
+  }
 
   return (
-    <div className="update-product-container" >
-      <div className="center-container"style={{marginTop:"7rem"}}>
+    <div className="update-product-container">
+      <div className="center-container" style={{ marginTop: "7rem" }}>
         <h1>Update Product</h1>
-        <form className="row g-3 pt-1" onSubmit={handleSubmit}>
-          <div className="col-md-6">
-            <label className="form-label">
-              <h6>Name</h6>
-            </label>
-            <input
-              type="text"
-              className="form-control"
-              placeholder={product.name}
-              value={updateProduct.name}
-              onChange={handleChange}
-              name="name"
-            />
+        {error && (
+          <div className="alert alert-danger" role="alert">
+            {error}
           </div>
-          <div className="col-md-6">
-            <label className="form-label">
-              <h6>Brand</h6>
-            </label>
-            <input
-              type="text"
-              name="brand"
-              className="form-control"
-              placeholder={product.brand}
-              value={updateProduct.brand}
-              onChange={handleChange}
-              id="brand"
-            />
-          </div>
-          <div className="col-12">
-            <label className="form-label">
-              <h6>Description</h6>
-            </label>
-            <input
-              type="text"
-              className="form-control"
-              placeholder={product.description}
-              name="description"
-              onChange={handleChange}
-              value={updateProduct.description}
-              id="description"
-            />
-          </div>
-          <div className="col-5">
-            <label className="form-label">
-              <h6>Price</h6>
-            </label>
-            <input
-              type="number"
-              className="form-control"
-              onChange={handleChange}
-              value={updateProduct.price}
-              placeholder={product.price}
-              name="price"
-              id="price"
-            />
-          </div>
-          <div className="col-md-6">
-            <label className="form-label">
-              <h6>Category</h6>
-            </label>
-            <select
-              className="form-select"
-              value={updateProduct.category}
-              onChange={handleChange}
-              name="category"
-              id="category"
-            >
-              <option value="">Select category</option>
-              <option value="laptop">Laptop</option>
-              <option value="headphone">Headphone</option>
-              <option value="mobile">Mobile</option>
-              <option value="electronics">Electronics</option>
-              <option value="toys">Toys</option>
-              <option value="fashion">Fashion</option>
-            </select>
-          </div>
-
-          <div className="col-md-4">
-            <label className="form-label">
-              <h6>Stock Quantity</h6>
-            </label>
-            <input
-              type="number"
-              className="form-control"
-              onChange={handleChange}
-              placeholder={product.stockQuantity}
-              value={updateProduct.stockQuantity}
-              name="stockQuantity"
-              id="stockQuantity"
-            />
-          </div>
-          <div className="col-md-8">
-            <label className="form-label">
-              <h6>Image</h6>
-            </label>
-            <img
-              src={image ? URL.createObjectURL(image) : "Image unavailable"}
-              alt={product.imageName}
-              style={{
-                width: "100%",
-                height: "180px",
-                objectFit: "cover",
-                padding: "5px",
-                margin: "0",
-              }}
-            />
-            <input
-              className="form-control"
-              type="file"
-              onChange={handleImageChange}
-              placeholder="Upload image"
-              name="imageUrl"
-              id="imageUrl"
-            />
-          </div>
-          <div className="col-12">
-            <div className="form-check">
+        )}
+        {loaded && (
+          <form className="row g-3 pt-1" onSubmit={handleSubmit}>
+            <div className="col-md-6">
+              <label className="form-label">
+                <h6>Name</h6>
+              </label>
               <input
-                className="form-check-input"
-                type="checkbox"
-                name="productAvailable"
-                id="gridCheck"
-                checked={updateProduct.productAvailable}
-                onChange={(e) =>
-                  setUpdateProduct({ ...updateProduct, productAvailable: e.target.checked })
-                }
+                type="text"
+                className="form-control"
+                value={updateProduct.name}
+                onChange={handleChange}
+                name="name"
               />
-              <label className="form-check-label">Product Available</label>
             </div>
-          </div>
+            <div className="col-md-6">
+              <label className="form-label">
+                <h6>Brand</h6>
+              </label>
+              <input
+                type="text"
+                name="brand"
+                className="form-control"
+                value={updateProduct.brand}
+                onChange={handleChange}
+                id="brand"
+              />
+            </div>
+            <div className="col-12">
+              <label className="form-label">
+                <h6>Description</h6>
+              </label>
+              <input
+                type="text"
+                className="form-control"
+                name="description"
+                onChange={handleChange}
+                value={updateProduct.description}
+                id="description"
+              />
+            </div>
+            <div className="col-5">
+              <label className="form-label">
+                <h6>Price</h6>
+              </label>
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                className="form-control"
+                onChange={handleChange}
+                value={updateProduct.price}
+                name="price"
+                id="price"
+              />
+            </div>
+            <div className="col-md-6">
+              <label className="form-label">
+                <h6>Category</h6>
+              </label>
+              <select
+                className="form-select"
+                value={updateProduct.category}
+                onChange={handleChange}
+                name="category"
+                id="category"
+              >
+                <option value="">Select category</option>
+                <option value="Laptop">Laptop</option>
+                <option value="Headphone">Headphone</option>
+                <option value="Mobile">Mobile</option>
+                <option value="Electronics">Electronics</option>
+                <option value="Toys">Toys</option>
+                <option value="Fashion">Fashion</option>
+              </select>
+            </div>
 
-          <div className="col-12">
-            <button type="submit" className="btn btn-primary">
-              Submit
-            </button>
-          </div>
-        </form>
+            <div className="col-md-4">
+              <label className="form-label">
+                <h6>Stock Quantity</h6>
+              </label>
+              <input
+                type="number"
+                min="0"
+                className="form-control"
+                onChange={handleChange}
+                value={updateProduct.stockQuantity}
+                name="stockQuantity"
+                id="stockQuantity"
+              />
+            </div>
+            <div className="col-md-8">
+              <label className="form-label">
+                <h6>Image</h6>
+              </label>
+              <img
+                src={imageSrc}
+                onError={handleImageError}
+                alt={updateProduct.name}
+                style={{
+                  width: "100%",
+                  height: "180px",
+                  objectFit: "cover",
+                  padding: "5px",
+                  margin: "0",
+                }}
+              />
+              <input
+                className="form-control"
+                type="file"
+                accept="image/*"
+                onChange={(e) => setNewImage(e.target.files[0] || null)}
+                name="imageUrl"
+                id="imageUrl"
+              />
+              <div className="form-text">Leave empty to keep the current image.</div>
+            </div>
+            <div className="col-12">
+              <div className="form-check">
+                <input
+                  className="form-check-input"
+                  type="checkbox"
+                  name="productAvailable"
+                  id="gridCheck"
+                  checked={updateProduct.productAvailable}
+                  onChange={(e) => setUpdateProduct({ ...updateProduct, productAvailable: e.target.checked })}
+                />
+                <label className="form-check-label">Product Available</label>
+              </div>
+            </div>
+
+            <div className="col-12">
+              <button type="submit" className="btn btn-primary" disabled={saving}>
+                {saving ? "Saving..." : "Submit"}
+              </button>
+            </div>
+          </form>
+        )}
       </div>
     </div>
   );
