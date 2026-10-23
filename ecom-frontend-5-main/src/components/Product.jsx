@@ -1,53 +1,47 @@
 import { useNavigate, useParams } from "react-router-dom";
-import { useContext, useEffect } from "react";
-import { useState } from "react";
+import { useContext, useEffect, useState } from "react";
 import AppContext from "../Context/Context";
-import axios from "../axios";
-import UpdateProduct from "./UpdateProduct";
+import API from "../axios";
+import { productImageUrl, handleImageError, PLACEHOLDER_IMAGE, getErrorMessage } from "../config";
+
 const Product = () => {
   const { id } = useParams();
-  const { data, addToCart, removeFromCart, cart, refreshData } =
-    useContext(AppContext);
+  const { addToCart, removeFromCart, refreshData } = useContext(AppContext);
   const [product, setProduct] = useState(null);
-  const [imageUrl, setImageUrl] = useState("");
+  const [notFound, setNotFound] = useState(false);
   const navigate = useNavigate();
 
   useEffect(() => {
-    const fetchProduct = async () => {
-      try {
-        const response = await axios.get(
-          `http://localhost:8080/api/product/${id}`
-        );
-        setProduct(response.data);
-        if (response.data.imageName) {
-          fetchImage();
-        }
-      } catch (error) {
+    let cancelled = false;
+    setProduct(null);
+    setNotFound(false);
+
+    API.get(`/product/${id}`)
+      .then((response) => {
+        if (!cancelled) setProduct(response.data);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        if (error.response && error.response.status === 404) setNotFound(true);
         console.error("Error fetching product:", error);
-      }
-    };
+      });
 
-    const fetchImage = async () => {
-      const response = await axios.get(
-        `http://localhost:8080/api/product/${id}/image`,
-        { responseType: "blob" }
-      );
-      setImageUrl(URL.createObjectURL(response.data));
+    return () => {
+      cancelled = true;
     };
-
-    fetchProduct();
   }, [id]);
 
   const deleteProduct = async () => {
+    if (!window.confirm(`Delete "${product.name}"? This cannot be undone.`)) return;
     try {
-      await axios.delete(`http://localhost:8080/api/product/${id}`);
-      removeFromCart(id);
-      console.log("Product deleted successfully");
+      await API.delete(`/product/${id}`);
+      removeFromCart(product.id);
       alert("Product deleted successfully");
       refreshData();
       navigate("/");
     } catch (error) {
       console.error("Error deleting product:", error);
+      alert(getErrorMessage(error));
     }
   };
 
@@ -55,10 +49,19 @@ const Product = () => {
     navigate(`/product/update/${id}`);
   };
 
-  const handlAddToCart = () => {
+  const handleAddToCart = () => {
     addToCart(product);
     alert("Product added to cart");
   };
+
+  if (notFound) {
+    return (
+      <h2 className="text-center" style={{ padding: "10rem" }}>
+        Product not found
+      </h2>
+    );
+  }
+
   if (!product) {
     return (
       <h2 className="text-center" style={{ padding: "10rem" }}>
@@ -66,47 +69,54 @@ const Product = () => {
       </h2>
     );
   }
+
   return (
     <>
       <div className="containers" style={{ display: "flex" }}>
         <img
           className="left-column-img"
-          src={imageUrl}
-          alt={product.imageName}
+          src={product.imageName ? productImageUrl(product.id) : PLACEHOLDER_IMAGE}
+          onError={handleImageError}
+          alt={product.name}
           style={{ width: "50%", height: "auto" }}
         />
 
         <div className="right-column" style={{ width: "50%" }}>
           <div className="product-description">
-            <div style={{display:'flex',justifyContent:'space-between' }}>
-            <span style={{ fontSize: "1.2rem", fontWeight: 'lighter' }}>
-              {product.category}
-            </span>
-            <p className="release-date" style={{ marginBottom: "2rem" }}>
-              
-              <h6>Listed : <span> <i> {new Date(product.releaseDate).toLocaleDateString()}</i></span></h6>
-              {/* <i> {new Date(product.releaseDate).toLocaleDateString()}</i> */}
-            </p>
+            <div style={{ display: "flex", justifyContent: "space-between" }}>
+              <span style={{ fontSize: "1.2rem", fontWeight: "lighter" }}>{product.category}</span>
+              <div className="release-date" style={{ marginBottom: "2rem" }}>
+                {product.releaseDate && (
+                  <h6>
+                    Listed :{" "}
+                    <span>
+                      <i> {new Date(product.releaseDate).toLocaleDateString()}</i>
+                    </span>
+                  </h6>
+                )}
+              </div>
             </div>
-            
-           
-            <h1 style={{ fontSize: "2rem", marginBottom: "0.5rem",textTransform: 'capitalize', letterSpacing:'1px' }}>
+
+            <h1
+              style={{
+                fontSize: "2rem",
+                marginBottom: "0.5rem",
+                textTransform: "capitalize",
+                letterSpacing: "1px",
+              }}
+            >
               {product.name}
             </h1>
             <i style={{ marginBottom: "3rem" }}>{product.brand}</i>
-            <p style={{fontWeight:'bold',fontSize:'1rem',margin:'10px 0px 0px'}}>PRODUCT DESCRIPTION :</p>
+            <p style={{ fontWeight: "bold", fontSize: "1rem", margin: "10px 0px 0px" }}>PRODUCT DESCRIPTION :</p>
             <p style={{ marginBottom: "1rem" }}>{product.description}</p>
           </div>
 
           <div className="product-price">
-            <span style={{ fontSize: "2rem", fontWeight: "bold" }}>
-              {"$" + product.price}
-            </span>
+            <span style={{ fontSize: "2rem", fontWeight: "bold" }}>{"$" + product.price}</span>
             <button
-              className={`cart-btn ${
-                !product.productAvailable ? "disabled-btn" : ""
-              }`}
-              onClick={handlAddToCart}
+              className={`cart-btn ${!product.productAvailable ? "disabled-btn" : ""}`}
+              onClick={handleAddToCart}
               disabled={!product.productAvailable}
               style={{
                 padding: "1rem 2rem",
@@ -123,11 +133,8 @@ const Product = () => {
             </button>
             <h6 style={{ marginBottom: "1rem" }}>
               Stock Available :{" "}
-              <i style={{ color: "green", fontWeight: "bold" }}>
-                {product.stockQuantity}
-              </i>
+              <i style={{ color: "green", fontWeight: "bold" }}>{product.stockQuantity}</i>
             </h6>
-          
           </div>
           <div className="update-button" style={{ display: "flex", gap: "1rem" }}>
             <button
@@ -146,7 +153,6 @@ const Product = () => {
             >
               Update
             </button>
-            {/* <UpdateProduct product={product} onUpdate={handleUpdate} /> */}
             <button
               className="btn btn-primary"
               type="button"
